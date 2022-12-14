@@ -1,0 +1,221 @@
+---
+title: "Literature Analysis"
+author: "Luis Rojo-González"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    fig_caption: yes
+    number_sections: yes
+  header-includes:
+  - \usepackage{float}
+  - \usepackage{amsmath}
+  - \usepackage[spanish]{babel}
+  - \usepackage[utf8]{inputenc}
+  - \usepackage{natbib}
+csl: apa.csl
+bibliography: Literature.bib
+---
+
+```{=tex}
+\tableofcontents
+\listoffigures
+\listoftables
+```
+```{r echo=FALSE}
+#Working directory
+setwd("/Users/luisrojo/Library/CloudStorage/OneDrive-usach.cl/PhD/Literature_Review/Coordinated-Charging-Literature-Review")
+```
+
+```{r message=FALSE, warning=FALSE}
+# libraries
+require(readxl)
+require(writexl)
+require(dplyr)
+require(tidyverse)
+require(ggplot2)
+require(xtable)
+require(tikzDevice)
+options(mc.cores = parallel::detectCores(),
+        # tikzLatex = "PATH",
+        tz="CA")
+```
+
+```{r}
+# read the entire date base of articles to read
+articles <- read_excel(path = "Database.xlsx", sheet = "ReadingList") %>%
+  dplyr::select(c("ID", "Removing phase", "Author Full Names",
+                  "Article Title", "Source Title", "Author Keywords",
+                  "Keywords Plus", "Publication Year")) %>%
+  rename(Author = "Author Full Names", Title = "Article Title",
+         Journal = "Source Title", Keywords = "Author Keywords",
+         KP = "Keywords Plus", Year = "Publication Year",
+         Removing = "Removing phase") %>%
+  mutate(Removing = ifelse(is.na(Removing), "Pending", Removing),
+         ID = str_replace(ID, pattern = " ", replacement = ""))
+
+# read the filtered papers already read and classified
+##### first iteration:
+# - single station, 19 articles
+# - multi station, 12 articles
+# - power grid, 10 articles
+classified <- lapply(c("Single_Station", "Multi_Station", "Power_Grid"),
+                     function(x) {
+                       read_excel(path = "Database.xlsx", sheet = x) %>%
+                         mutate(Problem = x)
+                       }) %>%
+  bind_rows()
+
+data <- left_join(articles %>%
+                    mutate(Title = toupper(Title)),
+                  classified %>%
+                    dplyr::select(-c("Year", "Journal", "Authors", "Abstract",
+                                     "Keywords", "Analysis", "Cristicism",
+                                     "Why this classification?")) %>%
+                    mutate(Title = toupper(Title)),
+                  by = "Title")
+```
+
+Let's analyze the journal according to the status of the paper read
+
+```{r}
+journal_status <- articles %>%
+  filter(Removing %in% c("Abstract", "Body", "Pending", "OK")) %>%
+  group_by(Removing, Journal) %>%
+  summarise(Count = n()) %>%
+  ungroup() %>%
+  group_by(Journal) %>%
+  filter(sum(Count, na.rm = TRUE) != 1) %>%
+  ungroup() %>%
+  pivot_wider(names_from = Removing, values_from = Count) %>%
+  arrange(OK)
+```
+
+```{r}
+# let's extract the keywords by year, journal and problem
+keyword_complete <- apply(data, 1, function(x) {
+  # extract keywords
+  words <- x["Keywords"] %>%
+    # dplyr::select(c("Keywords")) %>%
+    # pull() %>%
+    strsplit("; ") %>%
+    unlist() %>%
+    toupper() %>%
+    data.frame(Keyword = .)
+  
+  # assign year, journal and problem
+  words <- words %>%
+    mutate(ID = x["ID"],
+           Year = x["Year"],
+           Journal = x["Journal"],
+           Problem = x["Problem"],
+           Removing = x["Removing"])
+  }) %>%
+  bind_rows()
+```
+
+```{r}
+keyword_analysis <- keyword_complete %>%
+  filter(Removing %in% c("OK")) %>%
+  group_by(Keyword, ID) %>%
+  summarise(Count = n()) %>%
+  ungroup()
+```
+
+```{r}
+keyword_id <- keyword_complete %>%
+  rowwise() %>%
+  mutate(Inclusion = ifelse(Keyword %in% keyword_analysis$Keyword,
+                            TRUE, FALSE)) %>%
+  ungroup() %>%
+  filter(Inclusion) %>%
+  dplyr::select(c("ID")) %>%
+  pull() %>%
+  unique()
+```
+
+```{r}
+articles_id <- articles %>%
+  # in selected journals
+  filter(Journal %in% journal_status$Journal) %>%
+  # include selected keywords
+  filter(ID %in% keyword_id) %>%
+  dplyr::select(c("ID")) %>%
+  mutate(Inclusion = TRUE)
+```
+
+```{r}
+articles_final <- left_join(articles,
+                            articles_id,
+                            by = "ID") %>%
+  mutate(Inclusion = ifelse(is.na(Inclusion), FALSE, Inclusion))
+```
+
+```{r eval=FALSE, include=FALSE}
+# export the results
+write.table(x = articles_final %>%
+              dplyr::select(c("Inclusion")),
+            file = "Deletion.txt",
+            row.names = FALSE)
+```
+
+\section{Table analysis of papers by classification}
+
+```{r}
+table <- data %>%
+  filter(Removing == "OK") %>%
+  arrange(Year) %>%
+  dplyr::select(c("Bibtex", "Charging facility", "Modeling",
+                  "Dispatching", "EVSE", "Formulation", "Environment",
+                  "MPC", "Objective", "Price", "EVs", "Fleet",
+                  "RESs", "Charging", "Charging time", "Benchmark algorithms", "Problem")) %>%
+  rename(Reference = "Bibtex",
+         Facility = "Charging facility") %>%
+  transmute(Reference = paste0(str_replace(gsub(",.*", "", Reference),
+                                           "@article", "\\cite"), "}"),
+            Facility = gsub("\\s*\\([^\\)]+\\)", "", Facility),
+            Info = paste0(substr(Modeling, 1, 1), " (", Dispatching, ")"),
+            EVSE = toupper(paste0(substr(EVSE, 1, 2), " (",
+                                  str_replace_all(str_extract(EVSE,
+                                                              pattern = "(?<=\\().*(?=\\))"),
+                                                  " kW", ""),
+                                  ")")),
+            Supply = str_replace_all(str_replace_all(Formulation,
+                                                     "Preemptive", "P"),
+                                     "Non-preemptive", "NP"),
+            Method = ifelse(substr(Environment, 1, 10) == "Simulation",
+                            "Simulation",
+                            str_extract(Environment,
+                                        pattern = "(?<=\\().*(?=\\))")),
+            MPC = ifelse(MPC != "No", "Yes", "No"),
+            Price = ifelse(Price == "No", "-",
+                           ifelse(Price == "Constant", "Constant",
+                                  str_extract(Price, pattern = "(?<=\\().*(?=\\))"))),
+            Fleet = paste0(toupper(substr(EVs, 1, 2)),
+                           " (", ifelse(Fleet == "No", "-", Fleet), ")"),
+            RESs = RESs,
+            Charging = paste0(Charging, " (",
+                              ifelse(`Charging time` == "Linear",
+                                     "L)", "NL)")),
+            Problem = Problem)
+```
+
+```{r}
+# export the table by problems
+lapply(unique(table$Problem),
+       function(x) {
+         print(xtable(table %>%
+                          filter(Problem == x) %>%
+                          dplyr::select(-c("Problem")),
+                      digits = 1, label = paste0("tab:", x),
+                      caption = ""),
+               caption.placement = "top",
+               comment = FALSE,
+               include.rownames = FALSE,
+               include.colnames = TRUE,
+               file = paste0("Tables/Literature_", x, ".tex"))
+       })
+```
+
+```{r}
+
+```
