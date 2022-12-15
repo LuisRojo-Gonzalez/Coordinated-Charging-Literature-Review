@@ -38,6 +38,7 @@ require(tikzDevice)
 options(mc.cores = parallel::detectCores(),
         # tikzLatex = "PATH",
         tz="CA")
+require(caret)
 ```
 
 ```{r}
@@ -155,67 +156,73 @@ articles_final <- left_join(articles,
 write.table(x = articles_final %>%
               dplyr::select(c("Inclusion")),
             file = "Deletion.txt",
-            row.names = FALSE)
+            row.names = FALSE,
+            col.names = FALSE)
 ```
 
-\section{Table analysis of papers by classification}
+\section{Data visualization to split the problems}
 
 ```{r}
-table <- data %>%
-  filter(Removing == "OK") %>%
-  arrange(Year) %>%
-  dplyr::select(c("Bibtex", "Charging facility", "Modeling",
-                  "Dispatching", "EVSE", "Formulation", "Environment",
-                  "MPC", "Objective", "Price", "EVs", "Fleet",
-                  "RESs", "Charging", "Charging time", "Benchmark algorithms", "Problem")) %>%
-  rename(Reference = "Bibtex",
-         Facility = "Charging facility") %>%
-  transmute(Reference = paste0(str_replace(gsub(",.*", "", Reference),
-                                           "@article", "\\cite"), "}"),
-            Facility = gsub("\\s*\\([^\\)]+\\)", "", Facility),
-            Info = paste0(substr(Modeling, 1, 1), " (", Dispatching, ")"),
-            EVSE = toupper(paste0(substr(EVSE, 1, 2), " (",
-                                  str_replace_all(str_extract(EVSE,
-                                                              pattern = "(?<=\\().*(?=\\))"),
-                                                  " kW", ""),
-                                  ")")),
-            Supply = str_replace_all(str_replace_all(Formulation,
-                                                     "Preemptive", "P"),
-                                     "Non-preemptive", "NP"),
-            Method = ifelse(substr(Environment, 1, 10) == "Simulation",
-                            "Simulation",
-                            str_extract(Environment,
-                                        pattern = "(?<=\\().*(?=\\))")),
-            MPC = ifelse(MPC != "No", "Yes", "No"),
-            Price = ifelse(Price == "No", "-",
-                           ifelse(Price == "Constant", "Constant",
-                                  str_extract(Price, pattern = "(?<=\\().*(?=\\))"))),
-            Fleet = paste0(toupper(substr(EVs, 1, 2)),
-                           " (", ifelse(Fleet == "No", "-", Fleet), ")"),
-            RESs = RESs,
-            Charging = paste0(Charging, " (",
-                              ifelse(`Charging time` == "Linear",
-                                     "L)", "NL)")),
-            Problem = Problem)
+features <- classified %>%
+  filter(Selected != "Pending") %>%
+  dplyr::select(c("Charging", "V2G", "Battery degradation", "Charging time", "EVs", "EVSE", "Power capacity",
+                  "RESs", "Modeling", "Point of view", "Energy market", "Formulation", "Environment",
+                  "Dispatching", "Charging facility", "Problem")) %>%
+  rename(Battery = `Battery degradation`,
+         ChargingTime = `Charging time`,
+         PowerCapacity = `Power capacity`,
+         PointView = `Point of view`,
+         Market = `Energy market`,
+         Facility = `Charging facility`) %>%
+  rowwise() %>%
+  mutate(EVs = strsplit(EVs," ")[[1]][1],
+         EVSE = strsplit(EVSE," ")[[1]][1]) %>%
+  ungroup() %>%
+  mutate(ChargingTime = ifelse(ChargingTime %in% c("Linear", "Nonlinear"), ChargingTime, "Linear"),
+         PowerCapacity = ifelse(PowerCapacity == "No", PowerCapacity, "Yes"),
+         RESs = ifelse(RESs == "No", RESs, "Yes"),
+         PointView = ifelse(PointView == "AU", PointView, "Driver")) %>%
+  separate(col = Formulation, into = c("PowerSupply", "Preemptive"), sep = " ") %>%
+  mutate(Preemptive = ifelse(str_replace(Preemptive, ",", "") == "(Preemptive)", "Yes", "No")) %>%
+  separate(col = Environment, into = c("Aux1", "Aux2"), sep = " and ") %>%
+  separate(col = Aux1, into = c("Method1", "Model1"), sep = " ") %>%
+  separate(col = Aux2, into = c("Method2", "Model2"), sep = " ") %>%
+  mutate(Model1 = str_extract(Model1, "(?<=\\().*(?=\\))"),
+         Model2 = str_extract(Model2, "(?<=\\().*(?=\\))")) %>%
+  filter(Method1 == "Optimization" | Method2 == "Optimization") %>%
+  dplyr::select(-c(Model1, Model2, Method1, Method2)) %>%
+  separate(Facility, into = c("Facility", "FacilityType"), sep = " ") %>%
+  mutate(FacilityType = str_extract(FacilityType, "(?<=\\().*(?=\\))")) %>%
+  na.omit()
 ```
 
 ```{r}
-# export the table by problems
-lapply(unique(table$Problem),
-       function(x) {
-         print(xtable(table %>%
-                          filter(Problem == x) %>%
-                          dplyr::select(-c("Problem")),
-                      digits = 1, label = paste0("tab:", x),
-                      caption = ""),
-               caption.placement = "top",
-               comment = FALSE,
-               include.rownames = FALSE,
-               include.colnames = TRUE,
-               file = paste0("Tables/Literature_", x, ".tex"))
-       })
+df_features_factor <- as.data.frame(apply(features, 2, function(x) as.factor(x)), stringsAsFactors = TRUE)
+
+dummy <- dummyVars(" ~ .", data = df_features_factor %>% dplyr::select(-c("Problem")))
+newdata <- data.frame(predict(dummy, newdata = df_features_factor %>% dplyr::select(-c("Problem"))),
+                      df_features_factor["Problem"])
 ```
 
 ```{r}
+# set the jaccard distance function
+jaccard_distance <- function(a, b) {
+  n_ones <- sum(a == 1 & b == 1)
+  n_zero_one <- sum(a == 0 & b == 1)
+  n_one_zero <- sum(a == 1 & b == 0)
 
+  distance <- n_ones / (n_ones + n_zero_one + n_one_zero)
+  return(1 - distance)
+}
 ```
+
+```{r}
+distance_matrix <- matrix(nrow = nrow(newdata), ncol = nrow(newdata))
+for(i in 1:nrow(newdata)) {
+  for(j in 1:nrow(newdata)) {
+    distance_matrix[i, j] <- jaccard_distance(newdata[i, 1:(ncol(newdata) - 1)],
+                                              newdata[j, 1:(ncol(newdata) - 1)])
+  }
+}
+```
+
