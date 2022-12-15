@@ -39,6 +39,8 @@ options(mc.cores = parallel::detectCores(),
         # tikzLatex = "PATH",
         tz="CA")
 require(caret)
+require(MASS)
+require(vegan)
 ```
 
 ```{r}
@@ -196,12 +198,13 @@ features <- classified %>%
   na.omit()
 ```
 
+\subsection{Distance metric: Jaccard index}
+
 ```{r}
 df_features_factor <- as.data.frame(apply(features, 2, function(x) as.factor(x)), stringsAsFactors = TRUE)
 
-dummy <- dummyVars(" ~ .", data = df_features_factor %>% dplyr::select(-c("Problem")))
-newdata <- data.frame(predict(dummy, newdata = df_features_factor %>% dplyr::select(-c("Problem"))),
-                      df_features_factor["Problem"])
+dummy <- dummyVars(" ~ .", data = df_features_factor)
+df_binary <- data.frame(predict(dummy, newdata = df_features_factor))
 ```
 
 ```{r}
@@ -217,12 +220,97 @@ jaccard_distance <- function(a, b) {
 ```
 
 ```{r}
-distance_matrix <- matrix(nrow = nrow(newdata), ncol = nrow(newdata))
-for(i in 1:nrow(newdata)) {
-  for(j in 1:nrow(newdata)) {
-    distance_matrix[i, j] <- jaccard_distance(newdata[i, 1:(ncol(newdata) - 1)],
-                                              newdata[j, 1:(ncol(newdata) - 1)])
+jaccard_matrix <- matrix(nrow = nrow(df_binary), ncol = nrow(df_binary))
+for(i in 1:nrow(df_binary)) {
+  for(j in 1:nrow(df_binary)) {
+    jaccard_matrix[i, j] <- jaccard_distance(df_binary[i, ],
+                                             df_binary[j, ])
   }
 }
 ```
+
+\subsection{Multidimensional scalling}
+
+```{r}
+# Multi-Dimensional scaling
+set.seed(12345)
+
+mds_jaccard = metaMDS(comm = jaccard_matrix,
+                      # distance = "jaccard",
+                      binary = TRUE,
+                      k = 2, # number of dimensions to project
+                      try = floor(0.1*nrow(jaccard_matrix)),
+                      trymax = floor(0.5*nrow(jaccard_matrix)),
+                      engine = "monoMDS",
+                      stress = 1,
+                      autotransform = FALSE,
+                      wascores = FALSE,
+                      maxit = 1000,
+                      zerodist = "add")
+```
+
+```{r}
+# get the solution from the MDS
+mds_points = mds_jaccard$points %>%
+  as_tibble() %>%
+  rename(x = MDS1, y = MDS2) %>%
+  add_column(., Problem = df_features_factor$Problem)
+
+# mds_species = mds_jaccard$species %>%
+#   as_tibble() %>%
+#   rename(x = MDS1, y = MDS2, z = MDS3)
+```
+
+
+```{r}
+# plot the results
+ggplot() +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  geom_hline(yintercept = 0,
+             linetype = "dashed") +
+  geom_point(data = mds_points,
+             aes(x, y,
+                 colour = Problem),
+             alpha = 1) +
+  # # add the country names
+  # geom_text(data = mds_points,
+  #           aes(x, y,
+  #               label = data[, 1] %>% pull()),
+  #           size = 2.5,
+  #           parse = FALSE,
+  #           vjust = "outward",
+  #           hjust = "outward",
+  #           # family = "Times",
+  #           col = "black") +
+  # geom_text(data = mds_species,
+  #           aes(x, y,
+  #               label = rownames(mds_bray$species)),
+  #           size = 3.5,
+  #           parse = TRUE,
+  #           vjust = "outward",
+  #           hjust = "outward",
+  #           # family = "Times",
+  #           col = "black") +
+  # geom_segment(data = mds_species,
+  #              aes(x = 0,
+  #                  xend = x,
+  #                  y = 0,
+  #                  yend = y),
+  #              size = 1,
+  #              arrow = arrow(length = unit(0.1, "in")),
+  #              col = "red") +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        panel.border = element_rect(fill = NA, colour = "black")) +
+  guides(colour = guide_legend(override.aes = list(size = 2.5)),
+         shape = guide_legend(override.aes = list(size = 2.5))) +
+  labs(x = "NMDS1",
+       y = "NMDS1",
+       colour = "Problem",
+       title = paste("Kruskal's stress:",
+                     round(mds_jaccard[["stress"]], 2), "%")) +
+  coord_fixed()
+```
+
 
