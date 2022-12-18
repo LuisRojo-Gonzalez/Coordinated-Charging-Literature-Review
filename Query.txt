@@ -1,0 +1,23 @@
+Query link
+
+(Updated: May 24th, 2022)
+Articles_WoS_1 (this does not include V2G)
+https://www.webofscience.com/wos/woscc/summary/e3f394fd-c7a7-4025-bf19-65f0e40b8b90-3c6e60eb/relevance/1
+
+(Updated: July 19th, 2022)
+Articles_WoS_2 (this includes V2G)
+https://www.webofscience.com/wos/woscc/summary/c431ecd4-d2ab-4436-b908-ed4cbe136c05-447d6abb/relevance/1
+
+---------------------------------------------------------------------------------------------------------------------
+
+(Updated: December 16th, 2022)
+- This only includes the articles that use a hierarchical approach, i.e., bilevel or trilevel optimization.
+
+* Web of Science (39 articles)
+https://www.webofscience.com/wos/woscc/summary/6570233f-729e-4cd6-ac51-9e2d1eee7cc1-66142e49/relevance/1
+(TI=((Charg* OR Recharge* OR Smart OR Coordinat* OR Hierarchical) AND Electric vehicle*)) AND AK=((Bi-level OR Bilevel OR Tri-level OR Trilevel OR Hierarchical) AND (optimi?ation or programming))
+
+* Compendex and Inspec (140 -unique- articles)
+(((((((Charg* OR Recharge* OR Smart OR Coordinat* OR Hierarchical) AND Electric vehicle*)) WN TI AND ((Bi-level OR Bilevel OR Tri-level OR Trilevel OR Hierarchical) AND (optimi?ation OR programming)) WN KY))) AND (({ja} WN DT) AND ({english} WN LA)))
+
+* Scopus
