@@ -1,0 +1,70 @@
+---
+title: "ReadingList"
+author: "Luis Rojo-González"
+date: "2022-12-20"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r warning=FALSE, message=FALSE}
+require(readxl)
+require(writexl)
+require(tidyverse)
+require(data.table)
+require(stringr)
+```
+
+```{r}
+query_origin <- c("WoS", "Scopus", "CompendexInspec", "GoogleScholar")
+```
+
+```{r}
+articles_origin_list <-lapply(query_origin, function(x) {
+  read_xlsx(path = paste0("ReadingList/", x, ".xlsx"))
+  })
+
+names(articles_origin_list) <- query_origin
+```
+
+```{r}
+columns_names <- list(wos_cols <- c("Article Title", "Author Full Names", "Source Title", "Publication Year",
+                                    "DOI", "Abstract", "WorkType"),
+                      scopus_cols <- c("Title", "Authors", "Source title", "Year", "DOI", "Abstract", "WorkType"),
+                      compendexinspec_cols <- c("Title", "Author", "Source", "Publication year",
+                                                "DOI", "Abstract", "Database", "WorkType"),
+                      google_cols <- c("Title", "Authors", "Source", "Year", "DOI", "Abstract", "WorkType"))
+
+names(columns_names) <- query_origin
+```
+
+```{r}
+reading_list <- lapply(1:length(query_origin), function(x) {
+  df <- articles_origin_list[[query_origin[x]]] %>%
+    dplyr::select(as.vector(columns_names[[query_origin[x]]])) %>%
+    filter(WorkType == "Journal") %>%
+    select(-c("WorkType"))
+  
+  if(!("Database" %in% colnames(df))) {
+    df$Database <- query_origin[x]
+  }
+  
+  colnames(df) <- c("Title" , "Author", "Source", "Year", "DOI", "Abstract", "Database")
+  return(df)
+  }) %>%
+  rbindlist()
+```
+
+```{r}
+reading_list <- reading_list %>%
+  mutate(Title = str_to_title(Title)) %>%
+  filter(!duplicated(Title)) %>%
+  arrange(Year)
+```
+
+```{r}
+write_xlsx(reading_list, path = "ReadingList.xlsx")
+```
+
